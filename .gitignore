@@ -1,0 +1,15 @@
+.docs/
+
+# macOS
+.DS_Store
+
+# Node
+node_modules/
+npm-debug.log*
+
+# 本機環境
+*.local
+
+# 使用者提供的頁面存檔（可能含個資，不要進版控）
+*_files/
+page-dumps/

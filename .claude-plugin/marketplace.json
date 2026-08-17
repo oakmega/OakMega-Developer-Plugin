@@ -1,0 +1,16 @@
+{
+  "name": "oakmega-developer",
+  "owner": {
+    "name": "OakMega"
+  },
+  "metadata": {
+    "description": "OakMega 開發者工具 plugin marketplace。"
+  },
+  "plugins": [
+    {
+      "name": "oakmega-developer",
+      "source": "./oakmega-developer",
+      "description": "開發 OakMega 網頁型工具（授權頁／表單／預約中心／優惠券）的客製化元件。涵蓋跨網域 sandbox iframe 與 cs_tool 同源 iframe 兩種情境。"
+    }
+  ]
+}
