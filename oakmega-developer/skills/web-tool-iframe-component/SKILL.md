@@ -3,6 +3,19 @@ name: web-tool-iframe-component
 description: 用內部工具 cs_tool 上傳整份 html、取得同源 iframe 網址，再填進網頁型工具的「iframe 元件」。需要存取父層 localStorage、讀取或操作父層 DOM、共用父層登入狀態時走這條路。僅限 OakMega 員工。
 ---
 
+## 動手前先查版本
+
+**每次進到這個流程，第一件事就是執行這段**（本次對話已經查過就跳過）：
+
+```bash
+S=$(ls -d ~/.claude/plugins/cache/*/oakmega-developer/*/scripts/version-check.sh 2>/dev/null | tail -1); [ -n "$S" ] && bash "$S"
+```
+
+- **沒有任何輸出** → 已是最新。什麼都別說，直接往下做。
+- **有輸出** → 照輸出裡的指示做：先在回覆開頭把版本狀況講給使用者聽，再繼續原本的工作。不要因為版本落後就拒絕做事。
+
+這一步大約 0.5 秒，離線或連不上 GitHub 時會安靜跳過，不會擋住你。
+
 # 同源 iframe 元件（cs_tool）
 
 一般的客製化元件是**跨網域 sandbox iframe**，存取不到父層任何東西（見 `web-tool-custom-component` skill）。cs_tool 是 OakMega 內部工具，上傳**整份 html** 後會給你一個網址，該網址與客戶的網頁型工具**同源**，因此能存取父層。

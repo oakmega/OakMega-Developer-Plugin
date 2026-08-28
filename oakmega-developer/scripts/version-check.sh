@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # OakMega Developer plugin — 版本守門
 #
-# 綁在 SessionStart 與 UserPromptSubmit，每次都做：
+# 由 commands/web-tool-component.md 與兩份 SKILL.md 在開頭直接呼叫
+# （不走 hook —— 桌面版的 plugin hook 沒有被觸發，改用這條確定會跑的路）。
+#
+# 每次都做：
 #   1. 抓 GitHub 上的 plugin.json，比對 version（一個幾百 bytes 的 HTTP GET）
 #   2. 遠端比較新 → 下載 tarball，把新檔案換進 plugin 快取目錄
 #   3. 提示使用者重新啟動 Claude Code
@@ -20,20 +23,17 @@ RAW_URL="https://raw.githubusercontent.com/$SLUG/HEAD/$PLUGIN_SUBDIR/.claude-plu
 TAR_URL="https://codeload.github.com/$SLUG/tar.gz/HEAD"
 GIT_URL="https://github.com/$SLUG.git"
 
+# 由 skill／指令的 markdown 直接呼叫。CLAUDE_PLUGIN_ROOT 有設就用，
+# 沒設就從腳本自己的位置往上一層推。
 ROOT="${CLAUDE_PLUGIN_ROOT:-}"
-[ -n "$ROOT" ] && [ -d "$ROOT" ] || exit 0
+if [ -z "$ROOT" ] || [ ! -d "$ROOT" ]; then
+  ROOT="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)"
+fi
+[ -n "$ROOT" ] && [ -f "$ROOT/.claude-plugin/plugin.json" ] || exit 0
 
 WORK=""
 cleanup() { [ -n "$WORK" ] && rm -rf "$WORK"; }
 trap cleanup EXIT
-
-HOOK_EVENT="SessionStart"
-if [ ! -t 0 ]; then
-  HOOK_INPUT="$(cat 2>/dev/null)"
-  case "$HOOK_INPUT" in
-    *'"hook_event_name"'*'UserPromptSubmit'*) HOOK_EVENT="UserPromptSubmit" ;;
-  esac
-fi
 
 # ---------- 小工具 ----------
 
@@ -59,15 +59,8 @@ http_download() { # $1 = url, $2 = 存檔路徑
   fi
 }
 
-json_escape() {
-  printf '%s' "$1" \
-    | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' \
-    | awk 'BEGIN{ORS=""} {if (NR>1) printf "\\n"; print}'
-}
-
-emit() { # $1 = 給使用者看的一行字, $2 = 給 Claude 的指示
-  printf '{"systemMessage":"%s","hookSpecificOutput":{"hookEventName":"%s","additionalContext":"%s"}}\n' \
-    "$(json_escape "$1")" "$HOOK_EVENT" "$(json_escape "$2")"
+emit() { # $1 = 給使用者看的一句話, $2 = 給 Claude 的指示
+  printf '%s\n\n%s\n' "$1" "$2"
 }
 
 pick_version() { # 從 stdin 的 plugin.json 內容挑出 version

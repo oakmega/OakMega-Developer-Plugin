@@ -42,27 +42,30 @@
 | Skill | `web-tool-custom-component` | 跨網域 sandbox iframe 的完整規則 |
 | Skill | `web-tool-iframe-component` | cs_tool 同源 iframe 的開發流程 |
 | Agent | `web-tool-page-analyst` | 分析使用者下載的整頁存檔，回傳父層結構的精簡報告 |
-| Hook | 版本守門 | 開新對話與每次送訊息時比對 GitHub 版本，落後就自動更新並提示重啟 |
+| 腳本 | `scripts/version-check.sh` | 三個進入點在開頭都會呼叫它，比對 GitHub 版本，落後就自動更新 |
 
 `web-tool-page-analyst` 是 subagent，用來讀那些動輒數 MB 的網頁存檔，只把開發需要的少量事實帶回主對話，不佔用主線 context。
 
 ## 版本守門（自動更新）
 
-plugin 掛了兩個 hook —— `SessionStart`（開新對話）和 `UserPromptSubmit`（每次送出訊息）——**每次都直接問一次 GitHub**。
+`/web-tool-component` 指令和兩份 skill 的 markdown **開頭都寫了一段「動手前先查版本」**，AI 進到流程就會先跑 [`scripts/version-check.sh`](oakmega-developer/scripts/version-check.sh)。
 
-- 已是最新 → 完全不出聲。
-- 有新版 → 直接把新檔案換進 plugin 快取目錄，然後提示你「完全關閉並重新開啟 Claude Code」。**檔案換好了，但要重啟才會載入。**
-- 沒辦法自動更新（本機開發用 checkout、沒有寫入權限）→ 只提示，並附上手動更新步驟，不動你的檔案。
+- 已是最新 → 腳本沒有任何輸出，AI 直接往下做，不會多嘴。
+- 有新版 → 直接把新檔案換進 plugin 快取目錄，並要 AI 告訴你「重啟 Claude Code 才會載入」。
+- 沒辦法自動更新（本機開發用 checkout、沒有寫入權限）→ 只提示，不動你的檔案。
 
-實作在 [`oakmega-developer/hooks/version-check.sh`](oakmega-developer/hooks/version-check.sh)。行為：
+### 為什麼不用 hook
 
-- 只用 **curl + tar**（macOS／Linux／Git for Windows 都內建，不用另外裝東西）。沒有 curl 就試 wget，都沒有才退回 git；連 git 都沒有就靜默跳過。
+本來是做成 `SessionStart` / `UserPromptSubmit` hook 的，但**在 Claude 桌面版實測，plugin hook 一次都沒有被觸發**（在腳本第一行寫 log 驗證過，log 全空）。`/reload-plugins` 也只有終端機 CLI 才有。
+
+寫在 markdown 裡不依賴任何註冊機制 —— 只要指令或 skill 被叫起來，這段就一定會被讀到。代價是它靠 AI 照著做，不像 hook 那樣是硬性的。
+
+### 腳本行為
+
+- 只用 **curl + tar**（macOS／Linux／Git for Windows 都內建）。沒有 curl 就試 wget，都沒有才退回 git；連 git 都沒有就靜默跳過。
 - 平常只抓一個 `plugin.json`（幾百 bytes，約 0.5 秒）比對版本；真的要更新時才下載 tarball（約 13 KB）。
-- **沒有快取、沒有狀態檔。** 每次都問一次，回答的永遠是當下的事實——不會拿舊結論湊數。
-- 版本查詢的 timeout 壓在 6 秒、連線 3 秒。離線時約 0.09 秒就結束，不會卡住你送訊息。
-- 換檔案用 rename swap，舊版整個換掉（被刪掉的檔案不會殘留）。`.in_use` 等 Claude Code 自己的標記檔會保留。
-- **任何一步失敗都靜默結束，不會擋住你的對話。**
-
-### 已知取捨
-
-「請重啟」這句只會在**換檔案的那一瞬間**講一次。之後磁碟上已經是新版，檢查結果就是「已最新」，不會再提醒。腳本沒辦法知道你到底重啟了沒，與其重複播一句可能已經過期的話，寧可只講一次準的。
+- **沒有快取、沒有狀態檔。** 每次都問一次，答案永遠是當下的事實。
+- timeout 壓在連線 3 秒／總計 6 秒。離線約 0.09 秒就結束。
+- 換檔案用 rename swap，舊版整個換掉。`.in_use` 等 Claude Code 自己的標記檔會保留。
+- 只動 `plugins/cache/*/*/*` 底下的目錄；本機開發用的 checkout（有 `.git`）一律不碰。
+- 任何一步失敗都靜默結束，不會擋住你的對話。

@@ -3,6 +3,19 @@ name: web-tool-custom-component
 description: 產生 OakMega 客製化元件的 html/css/js/height_setting 四個欄位，在跨網域 sandbox iframe 中渲染。當使用者要在授權頁、表單、預約中心、優惠券的內容區塊裡放一段自訂呈現時使用。若需要存取父層 localStorage 或 DOM，改用 web-tool-iframe-component。
 ---
 
+## 動手前先查版本
+
+**每次進到這個流程，第一件事就是執行這段**（本次對話已經查過就跳過）：
+
+```bash
+S=$(ls -d ~/.claude/plugins/cache/*/oakmega-developer/*/scripts/version-check.sh 2>/dev/null | tail -1); [ -n "$S" ] && bash "$S"
+```
+
+- **沒有任何輸出** → 已是最新。什麼都別說，直接往下做。
+- **有輸出** → 照輸出裡的指示做：先在回覆開頭把版本狀況講給使用者聽，再繼續原本的工作。不要因為版本落後就拒絕做事。
+
+這一步大約 0.5 秒，離線或連不上 GitHub 時會安靜跳過，不會擋住你。
+
 # OakMega 客製化元件
 
 產出 `html`、`css`、`js`、`height_setting` 四個欄位，`html`／`css`／`js` 會被送進獨立 iframe 渲染。視覺份量由使用者決定，他要多大就做多大，不要自我設限。
