@@ -62,11 +62,22 @@
 
 ## 更新 plugin
 
-- 桌面版：在 Personal plugins 裡對 marketplace 按 re-sync / update。
+**平常不用管。** 裝好之後，每次你開新對話，plugin 會自己跟 GitHub 對版本：
+
+- 已經是最新 → 什麼都不會說。
+- 有新版 → 自動幫你換成新版，然後跳一行提示要你**完全關閉並重新開啟 Claude Code**。看到就照做，重開才會載入新版。
+
+### 提示說「自動更新失敗」的時候
+
+- 桌面版：在 Personal plugins 裡對 marketplace 按 re-sync / update，再對 `oakmega-developer` 按 Update。
 - CLI 版：
 
   ```
   /plugin marketplace update oakmega-developer
   ```
 
-  再重新啟動 Claude Code。
+  再輸入 `/plugin`，對 `oakmega-developer` 按 Update。
+
+兩種都一樣，最後**完全關閉並重新開啟 Claude Code**。
+
+> 小提醒：`/plugin` 畫面上顯示的版本號，在自動更新之後可能還停在舊的數字，這是正常的——實際檔案已經換成新版了。

@@ -1,6 +1,6 @@
 {
   "name": "oakmega-developer",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "開發 OakMega 網頁型工具客製化元件的 Claude Code plugin。內含跨網域 sandbox iframe 與 cs_tool 同源 iframe 兩份 skill，以及分析父層頁面結構的 agent。",
   "author": {
     "name": "OakMega"
