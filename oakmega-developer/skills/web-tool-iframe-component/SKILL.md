@@ -37,41 +37,65 @@ cs_tool 只有 OakMega 員工能用。**開始前先問**：
 
 **嵌入**：填在網頁型工具設定的 **iframe 元件**（不是客製化元件）。設定項目：
 
-| 設定 | 選項 |
-| --- | --- |
-| 寬度 | 符合內容寬度／滿版寬度 |
-| 高度 | 直接填 px 值 |
+| 設定 | 選項                                                              |
+| ---- | ----------------------------------------------------------------- |
+| 寬度 | 沒有選項，一律滿版寬度，不用問使用者                              |
+| 高度 | 符合內容高度（`fit`）／滿版高度（`fill`）／自訂高度（填 px 數字） |
 
-實際渲染出來的 DOM（滿版寬度、高度 480 的情況）：
+實際渲染出來的 DOM（外層 `.edit-preview-content` 是編輯器每個內容區塊共用的容器；`480px` 只是自訂高度模式下的例子，實際數值依下面選的模式而定）：
 
 ```html
-<div class="iframe-is-full-width mt-16 pb-4">
-  <iframe width="100%" height="480" src="https://你的cs_tool網址"></iframe>
+<div class="edit-preview-content">
+  <div class="mt-16 pb-4">
+    <iframe
+      style="display: block; border: none; width: 100%; height: 480px"
+      src="https://你的cs_tool網址"
+    ></iframe>
+  </div>
 </div>
 ```
 
-## 高度：固定值，跟客製化元件完全相反
+## 高度：三種模式，自己依內容判斷選哪個，不用問使用者
 
-**沒有任何自動量測或高度回報機制。** 使用者在設定裡填多少 px 就是多少。因此：
+跟客製化元件（跨網域 sandbox iframe，只能靠 `postMessage` 回報高度）不同，cs_tool 是同源，父層可以直接讀你的 `document`／`body` 的 `scrollHeight`。三種怎麼選，判斷邏輯跟客製化元件一樣，自己依使用者要做的內容判斷即可：
 
-- **先問使用者高度會設多少**，照那個高度設計。不知道就問，不要自己假設。
-- 內容超過設定高度時，iframe 會出現自己的捲軸——不會被裁掉，但體驗差。
-- **`height: 100%`／`100vh` 在這裡可以用**，因為 iframe 的視窗高度就是那個固定值。這條跟 `web-tool-custom-component` 的規則相反，不要把兩邊的習慣混用。
-- 需要動態高度時，同源可以直接改父層的 iframe 元素，見下。
+- **多數情境選 `fit`**：文字、卡片、表單、輪播圖、一般互動元件——只要「內容多高，這塊就多高」是合理預期，就用這個，預設值。
+- **元件就是這個區塊的全部畫面時選 `fill`**：全螢幕地圖、簽名板、畫布／小遊戲，或使用者明確說要「撐滿」「佔滿畫面」。
+- **自訂高度（數字 px）幾乎用不到**：只有 `fit`／`fill` 都無法表達需求時才考慮。
+
+### `fit`（符合內容高度，多數情境選這個）
+
+父層用 `ResizeObserver` 監看你的 `<body>`，自動把 iframe 高度調整成內容的實際高度——**完全不用自己寫任何回報高度的 code**。規則跟客製化元件的 `fit` 模式相同（因為量測方式一樣是抓 `scrollHeight`，會踩到一樣的坑）：
+
+- 不要用 `height: 100vh`，也不要對 `html`／`body` 設 `height: 100%`——這樣量到的永遠是 viewport 高度，不是內容高度
+- 不要用 `position: absolute`／`fixed` 做超出內容高度的浮層（下拉選單、tooltip、modal），要走文件流，否則量不到
+- 不要用會改變版面尺寸的無限循環動畫（`transform`／`opacity` 不受此限）
+- 不要讓容器變空
+- 圖片給 `aspect-ratio` 或明確尺寸，減少圖片載入完成前後的高度跳動（`ResizeObserver` 會持續監看並重新量測，跳動會自動修正，但還是盡量避免閃爍）
+- 首次量測完成前，父層會先套用預設高度 `calc(100vh - 52px)`，短暫的截斷或空白是正常現象，不要寫補償邏輯
+
+### `fill`（滿版高度）
+
+撐滿外層剩餘可用空間，跟客製化元件的 `fill` 概念相同。元件就是這個區塊的全部畫面時用（全螢幕地圖、簽名板、畫布／小遊戲）。自己輸出的 html 最外層元素寫 `height: 100%`（或 flex `flex: 1` + `min-height: 0`）撐滿即可；內容超出時預設出現內部捲軸。
+
+### 自訂高度（數字 px，舊機制）
+
+**沒有任何自動量測。** 設定裡填多少 px 就是多少，內容超過會出現 iframe 自己的捲軸——不會被裁掉，但體驗差。真的要用這個模式時，自己依內容抓一個合理數字即可，不用特地去問使用者；需要動態改高度時，同源可以直接改父層的 iframe 元素，見下。
 
 ## `window.frameElement`：同源最重要的入口
 
 同源的價值不只是「能查父層 DOM」，而是你可以直接拿到**自己那個 `<iframe>` 元素**：
 
 ```js
-var host = window.frameElement;      // 父層文件裡的 <iframe> 元素
-var pdoc = window.parent.document;   // 父層 document
+var host = window.frameElement; // 父層文件裡的 <iframe> 元素
+var pdoc = window.parent.document; // 父層 document
 ```
 
 這比從 `parent.document` 用 selector 找可靠得多，因為完全不依賴父層的 class 名稱。常見用法：
 
 ```js
-// 讓自己的高度貼合內容（覆蓋設定裡的固定 px）
+// 自訂高度模式才需要：動態覆蓋設定裡的固定 px
+// （fit/fill 模式父層已經自動幫你調整高度，不用重複處理）
 if (host) host.height = document.documentElement.scrollHeight;
 
 // 找到自己所在的內容區塊，再從那裡找相鄰內容
@@ -95,6 +119,8 @@ var block = host && host.closest(".edit-preview-content");
 
 > `edit-preview-*` 這組命名容易誤導——**這就是前台實際頁面的結構**，不是後台編輯器專用的。
 
+選 `fill` 高度時，`.edit-preview-content` 會多一個 `.edit-preview-content-fill` class，iframe 外面也會多包一層 `.iframe-content-fill`（都是 flex 撐滿用的版面 class）。這兩個 class 只在 `fill` 模式才出現，不要拿來當定位用的 selector。
+
 ## 撰寫注意
 
 - **不要拿 `data-v-<hash>` 當 selector。** 那是 Vue scoped style 產生的，元件原始碼一改就換一組。
@@ -110,7 +136,7 @@ var block = host && host.closest(".edit-preview-content");
 
 ### 1. 問清楚要達成什麼
 
-用他答得出來的方式問：要從頁面上拿到什麼資訊、要改變頁面上的什麼、什麼時候發生、iframe 元件的高度會設多少。**不要問 selector、storage key** ——那是你等一下要自己從存檔裡找出來的。
+用他答得出來的方式問：要從頁面上拿到什麼資訊、要改變頁面上的什麼、什麼時候發生。iframe 元件的高度模式（`fit`／`fill`／自訂）依內容判斷即可，不用問。**不要問 selector、storage key** ——那是你等一下要自己從存檔裡找出來的。
 
 ### 2. 請使用者蒐集現場資料
 
@@ -119,13 +145,16 @@ var block = host && host.closest(".edit-preview-content");
 **頁面網址** — 每次都要。
 
 **整頁存檔**（需要分析結構時）
+
 > 請用電腦版 Chrome 打開那個頁面，按 `Cmd+S`（Windows 是 `Ctrl+S`），存檔類型選「**網頁，完整**」，存到我們的專案資料夾，再把路徑告訴我。
 > 存好後你會看到多出一個 `.html` 檔和一個同名的資料夾，兩個都要留著。
 
 **localStorage 內容**（需要讀寫父層 storage 時）
+
 > 在那個頁面按 `F12`（Mac 是 `Option+Cmd+I`）打開開發者工具，上方選 `Application`（應用程式），左邊找到 `Local Storage` 點開，點裡面的網址，右邊會出現一個表格。把那個表格截圖給我。
 
 **特定元素的結構**（需要操作某個元件時）
+
 > 在頁面上對著那個東西按右鍵，選「檢查」，右邊會跳出一段被藍色標起來的程式碼。對那段按右鍵 → `Copy` → `Copy outerHTML`，然後貼給我。
 
 ### 3. 分析
@@ -146,7 +175,7 @@ var block = host && host.closest(".edit-preview-content");
 
 > 1. 把這個檔案上傳到 cs_tool，會拿到一個網址。
 > 2. 到網頁型工具的設定裡新增一個 **iframe 元件**，把網址貼進去。
-> 3. 寬度選「滿版寬度」或「符合內容寬度」，高度填 `___px`（給他你設計時用的數字）。
+> 3. 寬度不用設定（一律滿版），高度選 `___`（依你判斷的模式：`符合內容高度`／`滿版高度`；只有無法判斷時才用自訂並填 `___px`）。
 
 ### 7. 驗證
 
