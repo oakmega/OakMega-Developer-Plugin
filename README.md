@@ -42,23 +42,27 @@
 | Skill | `web-tool-custom-component` | 跨網域 sandbox iframe 的完整規則 |
 | Skill | `web-tool-iframe-component` | cs_tool 同源 iframe 的開發流程 |
 | Agent | `web-tool-page-analyst` | 分析使用者下載的整頁存檔，回傳父層結構的精簡報告 |
-| Hook | `SessionStart` 版本守門 | 每次開新對話時比對 GitHub 版本，落後就自動更新並提示重啟 |
+| Hook | 版本守門 | 開新對話與每次送訊息時比對 GitHub 版本，落後就自動更新並提示重啟 |
 
 `web-tool-page-analyst` 是 subagent，用來讀那些動輒數 MB 的網頁存檔，只把開發需要的少量事實帶回主對話，不佔用主線 context。
 
 ## 版本守門（自動更新）
 
-plugin 裝了一個 `SessionStart` hook：**每次開新對話時會先跟 GitHub 對版本**。
+plugin 掛了兩個 hook —— `SessionStart`（開新對話）和 `UserPromptSubmit`（每次送出訊息）——**每次都直接問一次 GitHub**。
 
 - 已是最新 → 完全不出聲。
 - 有新版 → 直接把新檔案換進 plugin 快取目錄，然後提示你「完全關閉並重新開啟 Claude Code」。**檔案換好了，但要重啟才會載入。**
-- 沒辦法自動更新（本機開發用 checkout、沒有寫入權限、你自己關掉了）→ 只提示，並附上手動更新步驟，不動你的檔案。
+- 沒辦法自動更新（本機開發用 checkout、沒有寫入權限）→ 只提示，並附上手動更新步驟，不動你的檔案。
 
 實作在 [`oakmega-developer/hooks/version-check.sh`](oakmega-developer/hooks/version-check.sh)。行為：
 
 - 只用 **curl + tar**（macOS／Linux／Git for Windows 都內建，不用另外裝東西）。沒有 curl 就試 wget，都沒有才退回 git；連 git 都沒有就靜默跳過。
 - 平常只抓一個 `plugin.json`（幾百 bytes，約 0.5 秒）比對版本；真的要更新時才下載 tarball（約 13 KB）。
-- 連網結果快取 30 分鐘，狀態放在 `~/.claude/plugins/.oakmega-developer-update-state`。快取期間完全不連網（約 0.02 秒）。
+- **沒有快取、沒有狀態檔。** 每次都問一次，回答的永遠是當下的事實——不會拿舊結論湊數。
+- 版本查詢的 timeout 壓在 6 秒、連線 3 秒。離線時約 0.09 秒就結束，不會卡住你送訊息。
 - 換檔案用 rename swap，舊版整個換掉（被刪掉的檔案不會殘留）。`.in_use` 等 Claude Code 自己的標記檔會保留。
-- **任何一步失敗都靜默結束，不會擋住你的對話。** 離線、公司防火牆擋住 GitHub、環境什麼工具都沒有，都只是安靜跳過。
-- 更新後一小時內，每次開新對話都會再提醒一次重啟，之後不再囉嗦。
+- **任何一步失敗都靜默結束，不會擋住你的對話。**
+
+### 已知取捨
+
+「請重啟」這句只會在**換檔案的那一瞬間**講一次。之後磁碟上已經是新版，檢查結果就是「已最新」，不會再提醒。腳本沒辦法知道你到底重啟了沒，與其重複播一句可能已經過期的話，寧可只講一次準的。

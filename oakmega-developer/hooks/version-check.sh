@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# OakMega Developer plugin — SessionStart 版本守門
+# OakMega Developer plugin — 版本守門
 #
-# 每次 session 開始時：
+# 綁在 SessionStart 與 UserPromptSubmit，每次都做：
 #   1. 抓 GitHub 上的 plugin.json，比對 version（一個幾百 bytes 的 HTTP GET）
 #   2. 遠端比較新 → 下載 tarball，把新檔案換進 plugin 快取目錄
 #   3. 提示使用者重新啟動 Claude Code
 #
+# 沒有快取、沒有狀態檔：每次都直接問一次 GitHub，答案永遠是當下的事實。
 # 相依：curl（或 wget）+ tar。兩者 macOS／Linux／Git for Windows 都內建。
 # 都沒有的話退回用 git；連 git 都沒有就靜默跳過。
 # 任何一步失敗都靜默結束（exit 0），絕不擋住 session。
@@ -14,8 +15,6 @@ set -uo pipefail
 
 SLUG="oakmega/OakMega-Developer-Plugin"
 PLUGIN_SUBDIR="oakmega-developer"
-TTL=1800              # 兩次連網檢查的最小間隔
-PENDING_WINDOW=3600   # 更新後多久內，每個新 session 都再提醒一次重啟
 
 RAW_URL="https://raw.githubusercontent.com/$SLUG/HEAD/$PLUGIN_SUBDIR/.claude-plugin/plugin.json"
 TAR_URL="https://codeload.github.com/$SLUG/tar.gz/HEAD"
@@ -24,14 +23,17 @@ GIT_URL="https://github.com/$SLUG.git"
 ROOT="${CLAUDE_PLUGIN_ROOT:-}"
 [ -n "$ROOT" ] && [ -d "$ROOT" ] || exit 0
 
-CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-STATE_FILE="$CONFIG_DIR/plugins/.oakmega-developer-update-state"
-
 WORK=""
 cleanup() { [ -n "$WORK" ] && rm -rf "$WORK"; }
 trap cleanup EXIT
 
-NOW="$(date +%s)"
+HOOK_EVENT="SessionStart"
+if [ ! -t 0 ]; then
+  HOOK_INPUT="$(cat 2>/dev/null)"
+  case "$HOOK_INPUT" in
+    *'"hook_event_name"'*'UserPromptSubmit'*) HOOK_EVENT="UserPromptSubmit" ;;
+  esac
+fi
 
 # ---------- 小工具 ----------
 
@@ -39,9 +41,9 @@ have() { command -v "$1" >/dev/null 2>&1; }
 
 http_get() { # $1 = url，內容印到 stdout
   if have curl; then
-    curl -fsSL --max-time 20 -H 'Cache-Control: no-cache' "$1" 2>/dev/null
+    curl -fsSL --connect-timeout 3 --max-time 6 -H 'Cache-Control: no-cache' "$1" 2>/dev/null
   elif have wget; then
-    wget -qO- --timeout=20 --tries=1 "$1" 2>/dev/null
+    wget -qO- --timeout=6 --tries=1 "$1" 2>/dev/null
   else
     return 1
   fi
@@ -64,8 +66,8 @@ json_escape() {
 }
 
 emit() { # $1 = 給使用者看的一行字, $2 = 給 Claude 的指示
-  printf '{"systemMessage":"%s","hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' \
-    "$(json_escape "$1")" "$(json_escape "$2")"
+  printf '{"systemMessage":"%s","hookSpecificOutput":{"hookEventName":"%s","additionalContext":"%s"}}\n' \
+    "$(json_escape "$1")" "$HOOK_EVENT" "$(json_escape "$2")"
 }
 
 pick_version() { # 從 stdin 的 plugin.json 內容挑出 version
@@ -139,39 +141,6 @@ fetch_remote_tree() { # 真的要更新時才下載整包
   git_clone_src
 }
 
-# ---------- 狀態檔 ----------
-
-st_ts=0; st_local=""; st_status=""; st_remote=""; st_from=""; st_until=0
-
-load_state() {
-  [ -f "$STATE_FILE" ] || return 0
-  local line key val
-  while IFS= read -r line; do
-    key="${line%%=*}"; val="${line#*=}"
-    case "$key" in
-      ts)     st_ts="$(printf '%s' "$val" | tr -cd '0-9')" ;;
-      local)  st_local="$(printf '%s' "$val" | tr -cd '0-9A-Za-z.+-')" ;;
-      status) st_status="$(printf '%s' "$val" | tr -cd 'a-z')" ;;
-      remote) st_remote="$(printf '%s' "$val" | tr -cd '0-9A-Za-z.+-')" ;;
-      from)   st_from="$(printf '%s' "$val" | tr -cd '0-9A-Za-z.+-')" ;;
-      until)  st_until="$(printf '%s' "$val" | tr -cd '0-9')" ;;
-    esac
-  done < "$STATE_FILE"
-  st_ts="${st_ts:-0}"; st_until="${st_until:-0}"
-}
-
-save_state() { # local status remote from until
-  mkdir -p "$(dirname "$STATE_FILE")" 2>/dev/null || return 0
-  {
-    printf 'ts=%s\n'     "$NOW"
-    printf 'local=%s\n'  "$1"
-    printf 'status=%s\n' "$2"
-    printf 'remote=%s\n' "${3:-}"
-    printf 'from=%s\n'   "${4:-}"
-    printf 'until=%s\n'  "${5:-0}"
-  } > "$STATE_FILE" 2>/dev/null || true
-}
-
 # ---------- 三種訊息 ----------
 
 MANUAL_STEPS='手動更新方式：在輸入框執行 /plugin marketplace update oakmega-developer，再執行 /plugin 對 oakmega-developer 按 Update，最後完全關閉並重新開啟 Claude Code。'
@@ -191,16 +160,7 @@ say_failed() { # $1 = 本機版本, $2 = 遠端版本
 say_updated() { # $1 = 舊版本, $2 = 新版本
   emit \
     "🔄 OakMega Developer plugin 已自動更新 $1 → $2，請完全關閉並重新開啟 Claude Code 才會生效。" \
-    "[OakMega Developer plugin 版本檢查] plugin 檔案已從 $1 自動更新到 $2，但本次 session 載入的仍然是舊版 $1，必須重啟 Claude Code 才會生效。請在本次回覆的最開頭用繁體中文明確告訴使用者：plugin 已更新到 $2，需要「完全關閉並重新開啟 Claude Code」。在他重啟之前，若他要用 /web-tool-component 或 oakmega-developer 的任何 skill，先提醒他現在跑的還是舊版、建議重啟後再繼續；他若堅持先做，就照舊版規則做完，不要拒絕。另外：/plugin 畫面上顯示的版本號可能還停在 $1，這是正常的，實際檔案已經是新版。不要重複執行更新，也不要自己去改 plugin 快取目錄。"
-}
-
-replay_state() { # 用上次的結論回覆，不連網
-  case "$st_status" in
-    manual)  say_manual "$st_local" "$st_remote" ;;
-    failed)  say_failed "$st_from" "$st_remote" ;;
-    pending) [ "$NOW" -lt "$st_until" ] && say_updated "$st_from" "$st_remote" ;;
-    *) : ;;
-  esac
+    "[OakMega Developer plugin 版本檢查] 剛剛把磁碟上的 plugin 檔案從 $1 換成了 $2。這個 session 目前記憶體裡載入的規則還是換檔案之前的版本，要重啟 Claude Code 才會載入 $2。請在本次回覆的最開頭用繁體中文告訴使用者：plugin 已更新到 $2，建議完全關閉並重新開啟 Claude Code。他若要繼續用 /web-tool-component 或 oakmega-developer 的 skill，就照現在載入的規則做完，不要拒絕。另外：/plugin 畫面顯示的版本號可能對不上，實際檔案以 $2 為準。這則訊息只會出現這一次，不要重複執行更新，也不要自己去改 plugin 快取目錄。"
 }
 
 # ---------- 開始 ----------
@@ -208,24 +168,14 @@ replay_state() { # 用上次的結論回覆，不連網
 CUR_VER="$(read_version "$ROOT/.claude-plugin/plugin.json")" || CUR_VER=""
 [ -n "$CUR_VER" ] || exit 0
 
-load_state
-
-# 狀態檔仍對應同一份本機版本、而且還在 TTL 內 → 沿用上次結論，完全不連網
-if [ -n "$st_status" ] && [ "$st_local" = "$CUR_VER" ] && [ "$((NOW - st_ts))" -lt "$TTL" ]; then
-  replay_state
-  exit 0
-fi
-
 # 1. 問遠端版本
 REMOTE_VER="$(fetch_remote_version)" || REMOTE_VER=""
 if [ -z "$REMOTE_VER" ]; then
-  # 連不上（離線、沒有 curl／wget／git）→ 沿用上次結論，不打擾
-  replay_state
+  # 連不上（離線、沒有 curl／wget／git）→ 安靜跳過，不猜
   exit 0
 fi
 
 if ! ver_gt "$REMOTE_VER" "$CUR_VER"; then
-  save_state "$CUR_VER" "ok" "$REMOTE_VER" "" 0
   exit 0
 fi
 
@@ -240,14 +190,12 @@ esac
 [ -w "$ROOT" ] && [ -w "$(dirname "$ROOT")" ] || CAN_WRITE=0
 
 if [ "$CAN_WRITE" = "0" ]; then
-  save_state "$CUR_VER" "manual" "$REMOTE_VER" "" 0
   say_manual "$CUR_VER" "$REMOTE_VER"
   exit 0
 fi
 
 # 3. 下載整包
 if ! fetch_remote_tree || [ -z "$SRC" ]; then
-  save_state "$CUR_VER" "failed" "$REMOTE_VER" "$CUR_VER" 0
   say_failed "$CUR_VER" "$REMOTE_VER"
   exit 0
 fi
@@ -256,7 +204,6 @@ fi
 NEW_VER="$(read_version "$SRC/.claude-plugin/plugin.json")" || NEW_VER=""
 [ -n "$NEW_VER" ] || NEW_VER="$REMOTE_VER"
 if ! ver_gt "$NEW_VER" "$CUR_VER"; then
-  save_state "$CUR_VER" "ok" "$NEW_VER" "" 0
   exit 0
 fi
 
@@ -288,11 +235,9 @@ fi
 rm -rf "$NEW" 2>/dev/null || true
 
 if [ "$FAILED" = "1" ]; then
-  save_state "$CUR_VER" "failed" "$NEW_VER" "$CUR_VER" 0
   say_failed "$CUR_VER" "$NEW_VER"
   exit 0
 fi
 
-save_state "$NEW_VER" "pending" "$NEW_VER" "$CUR_VER" "$((NOW + PENDING_WINDOW))"
 say_updated "$CUR_VER" "$NEW_VER"
 exit 0

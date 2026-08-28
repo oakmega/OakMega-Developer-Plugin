@@ -1,9 +1,20 @@
 {
-  "description": "OakMega Developer plugin 版本守門：每次 session 開始時檢查 GitHub 上有沒有新版，有的話自動更新並提示重啟。",
+  "description": "OakMega Developer plugin 版本守門：session 開始時、以及使用者每次送出訊息時，比對 GitHub 版本，落後就自動更新並提示重啟。",
   "hooks": {
     "SessionStart": [
       {
         "matcher": "startup|resume|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/version-check.sh\"",
+            "timeout": 45
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
         "hooks": [
           {
             "type": "command",
